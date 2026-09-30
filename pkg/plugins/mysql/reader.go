@@ -111,7 +111,7 @@ func (r *reader) Start() error {
 	if latestPosition == "" {
 		latestPosition = r.LatestPosition().Position
 	}
-	if err := json.Unmarshal([]byte(r.opt.Task.LastCDCPosition), &r.latestPosition); err != nil {
+	if err := json.Unmarshal([]byte(latestPosition), &r.latestPosition); err != nil {
 		r.opt.Logger.Error("can not parse last cdc position: %v", err)
 		return err
 	}
@@ -192,20 +192,16 @@ func (r *reader) Stop() error {
 }
 
 func (r *reader) LatestPosition() core.ReaderPosition {
-	sql := "SHOW MASTER STATUS"
-	var ver string
-	if err := r.conn.Raw("SELECT VERSION()").Scan(&ver).Error; err != nil {
-		r.opt.Logger.Error("can not get latest master position: %v", err)
-		return core.ReaderPosition{}
-	}
-	if ver > "8.0.34" {
-		sql = "SHOW BINARY LOG STATUS"
-	}
 	var ret struct {
 		File     string `gorm:"column:file"`
 		Position uint32 `gorm:"column:position"`
 	}
-	if err := r.conn.Raw(sql).Find(&ret).Error; err != nil {
+	err := r.conn.Raw("SHOW MASTER STATUS").Find(&ret).Error
+	if err != nil {
+		// MySQL 8.4+ 已移除 SHOW MASTER STATUS，回退到 SHOW BINARY LOG STATUS
+		err = r.conn.Raw("SHOW BINARY LOG STATUS").Find(&ret).Error
+	}
+	if err != nil {
 		r.opt.Logger.Error("can not get latest master position: %v", err)
 		return core.ReaderPosition{}
 	}
